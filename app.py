@@ -494,7 +494,7 @@ def generate_docx_report(sch_data, komponen_list):
     return bio.getvalue()
 
 # --- INTERFACE STREAMLIT ---
-st.title("📋 LEMBAR OBSERVASI MONEV PELAKSANAAN TKA")
+st.title("📋 MONEV PELAKSANAAN TKA TAHUN 2026")
 
 st.markdown(
     """
