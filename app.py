@@ -67,25 +67,22 @@ def format_indo_date(date_str):
         pass
     return date_str
 
-# Fungsi Membaca Data Master dari Berkas Excel Permanen
+# Fungsi Membaca Data Master dari Berkas Excel Permanen (SMK, SMA, SLB)
 def load_master_data():
     if os.path.exists(MASTER_FILE):
         try:
             xl = pd.ExcelFile(MASTER_FILE)
-            if "SMK" in xl.sheet_names:
-                df_smk = pd.read_excel(MASTER_FILE, sheet_name="SMK", skiprows=2)
-            else:
-                df_smk = pd.DataFrame()
-                
-            if "SMA" in xl.sheet_names:
-                df_sma = pd.read_excel(MASTER_FILE, sheet_name="SMA", skiprows=2)
-            else:
-                df_sma = pd.DataFrame()
-                
-            df_combined = pd.concat([df_smk, df_sma], ignore_index=True)
-            if "No" in df_combined.columns:
-                df_combined = df_combined.drop(columns=["No"])
-            return df_combined.drop_duplicates(subset=["Satuan Pendidikan"])
+            dfs = []
+            for sheet in ["SMK", "SMA", "SLB"]:
+                if sheet in xl.sheet_names:
+                    df_s = pd.read_excel(MASTER_FILE, sheet_name=sheet, skiprows=2)
+                    dfs.append(df_s)
+            
+            if dfs:
+                df_combined = pd.concat(dfs, ignore_index=True)
+                if "No" in df_combined.columns:
+                    df_combined = df_combined.drop(columns=["No"])
+                return df_combined.drop_duplicates(subset=["Satuan Pendidikan"])
         except Exception:
             try:
                 df = pd.read_excel(MASTER_FILE, skiprows=2)
@@ -191,7 +188,7 @@ def create_styled_sheet(ws, sheet_title, df_subset):
         else:
             ws.column_dimensions[col_letter].width = 15
 
-# Fungsi Menyimpan Data ke Master Excel dengan 2 Sheet Terpisah (SMA & SMK)
+# Fungsi Menyimpan Data ke Master Excel dengan 3 Sheet Terpisah (SMA, SMK, SLB)
 def save_to_master_excel(row_data):
     df_existing = load_master_data()
     
@@ -207,17 +204,30 @@ def save_to_master_excel(row_data):
     wb = openpyxl.Workbook()
     
     if "Satuan Pendidikan" in df_existing.columns:
-        df_smk = df_existing[df_existing["Satuan Pendidikan"].astype(str).str.contains("SMK", case=False, na=False)]
-        df_sma = df_existing[df_existing["Satuan Pendidikan"].astype(str).str.contains("SMA", case=False, na=False)]
+        sp_series = df_existing["Satuan Pendidikan"].astype(str)
+        
+        # Filter berdasarkan kata kunci
+        df_slb = df_existing[sp_series.str.contains("SLB", case=False, na=False)]
+        df_smk = df_existing[sp_series.str.contains("SMK", case=False, na=False) & ~sp_series.str.contains("SLB", case=False, na=False)]
+        df_sma = df_existing[sp_series.str.contains("SMA", case=False, na=False) & ~sp_series.str.contains("SLB", case=False, na=False)]
+        
+        # Sisa sekolah yang tidak mengandung SMA/SMK/SLB secara eksplisit dimasukkan ke SMA sebagai default
+        other_mask = ~sp_series.str.contains("SMK|SMA|SLB", case=False, na=False)
+        if other_mask.any():
+            df_sma = pd.concat([df_sma, df_existing[other_mask]], ignore_index=True)
     else:
         df_smk = pd.DataFrame()
         df_sma = pd.DataFrame()
+        df_slb = pd.DataFrame()
 
     ws_smk = wb.active
     create_styled_sheet(ws_smk, "SMK", df_smk)
 
     ws_sma = wb.create_sheet(title="SMA")
     create_styled_sheet(ws_sma, "SMA", df_sma)
+
+    ws_slb = wb.create_sheet(title="SLB")
+    create_styled_sheet(ws_slb, "SLB", df_slb)
 
     wb.save(MASTER_FILE)
     return df_existing
@@ -428,7 +438,7 @@ def generate_docx_report(sch_data, komponen_list):
     tbl_box.alignment = WD_TABLE_ALIGNMENT.CENTER
     tbl_box.autofit = False
     tbl_box.rows[0].cells[0].width = Inches(7.0)
-    set_table_borders(tbl_box, color="333333", sz="6") # Border kotak tegas rapi
+    set_table_borders(tbl_box, color="333333", sz="6")
     
     cell_box = tbl_box.cell(0, 0)
     p_box = cell_box.paragraphs[0]
@@ -489,7 +499,7 @@ st.title("📋 LEMBAR OBSERVASI MONEV PELAKSANAAN TKA")
 st.markdown(
     """
     <p style='color: #1F4E78; font-size: 1.05rem; font-weight: 600; margin-top: -10px; margin-bottom: 20px;'>
-        Jenjang SMA dan SMK Cabang Dinas Pendidikan Wilayah Kabupaten Bangkalan Tahun 2026
+        Jenjang SMA, SMK, dan SLB Cabang Dinas Pendidikan Wilayah Kabupaten Bangkalan Tahun 2026
     </p>
     """,
     unsafe_allow_html=True
@@ -544,7 +554,7 @@ default_status = selected_school_data["Status Pelaksanaan"] if edit_mode else "M
 default_moda = selected_school_data["Moda Pelaksanaan"] if edit_mode else "Online"
 
 with c1:
-    satuan_pendidikan = st.text_input("Nama Sekolah Penyelenggara", value=default_sekolah, disabled=edit_mode)
+    satuan_pendidikan = st.text_input("Nama Sekolah Penyelenggara (misal: SMA/SMK/SLB ...)", value=default_sekolah, disabled=edit_mode)
     if edit_mode:
         st.caption("ℹ️ Nama sekolah terkunci saat mode edit.")
     nama_petugas = st.text_input("Nama Petugas / Observer", value=default_petugas)
@@ -676,7 +686,7 @@ if not df_display.empty:
 # --- TABEL MASTER REKAP PERMANEN ---
 if not df_display.empty:
     st.markdown("---")
-    st.subheader("📊 Tabel Master Rekap Permanen (Semua Sekolah)")
+    st.subheader("📊 Tabel Master Rekap Permanen (Semua Sekolah - SMA, SMK & SLB)")
     
     df_show = df_display.copy()
     df_show.insert(0, "No", range(1, len(df_show) + 1))
